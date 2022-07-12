@@ -1,7 +1,5 @@
-
 use clap::{Subcommand, Args};
 use ini::Ini;
-// reqwes blocking client
 
 use std::{fs, process::{exit, self}, io::Write, path::Path, time::Instant};
 
@@ -24,16 +22,16 @@ pub enum Action {
     /// Create New Project With Given Name
     New(Project),
 
-    /// Add a new module to project 
+    /// Add new packages to project 
     Add(AddPackage),
 
-    /// Remove a module from project
+    /// Remove packages from project
     Remove(RemovePackage),
 
-    /// Run a script
+    /// Run a script defined in project.ini
     Run(RunScript),
 
-    /// Run main.py
+    /// Run main script defined in project.ini
     Start,
 
     /// Generate requirements.txt file
@@ -41,7 +39,14 @@ pub enum Action {
 
     /// Show the project.ini file
     Info,
+
+    /// Install packages from project.ini and create venv if not found
+    Install,
+
+    /// Update all packages 
+    Update,
 }
+
 
 
 #[derive(Args, Debug)]
@@ -62,7 +67,7 @@ pub struct Project {
     git: bool,
 
     /// Don't Create Virtual Environment
-    #[clap(short = 'v', long = "no-venv", takes_value = false)]
+    #[clap(short = 'n', long = "no-venv", takes_value = false)]
     no_venv: bool,
 
 }
@@ -130,32 +135,12 @@ impl Project {
         .set("version", self.version.as_str())
         .set("description", self.description.as_str())
         .set("main", "./src/main.py");
-        // create empty section Packages
         conf.with_section(Some("Packages"));
-        // create empty section Scripts
         conf.with_section(Some("Scripts"));
         conf.write_to_file(format!("{}/project.ini", self.name)).unwrap();
     }
 
-    fn setup_venv(&self) {
-        iprint("Setting Up Virtual Environment...".to_string());
-        let venv = process::Command::new("python")
-            .arg("-m")
-            .arg("venv")
-            .arg(format!("{}/venv", self.name))
-            .output();
-        if venv.is_err() {
-            eprint(venv.unwrap_err().to_string());
-            exit(1);
-        }
-        let venv = venv.unwrap();
-        if !venv.status.success() {
-            eprint(format!("{}", String::from_utf8_lossy(&venv.stderr)));
-            exit(1);
-        }
-        iprint("Virtual Environment Created Successfully".to_string());
-       
-    }
+    
 
 
     pub fn create_project(&self) {
@@ -179,9 +164,9 @@ impl Project {
 
         // venv
         if !self.no_venv {
-            self.setup_venv();
+            setup_venv(format!("{}/venv", self.name));
         } else {
-            wprint("Virtual environment is disable 'add' and 'remove' command will not work".to_string());
+            wprint("Virtual environment is disabled, some commands might not work".to_string());
         }
 
         // save
@@ -189,7 +174,9 @@ impl Project {
 
         let elapsed = start.elapsed();
         iprint(format!("Completed in {}s", elapsed.as_secs()));
-
+        println!("\nTo get started:");
+        println!("\tcd {}", self.name);
+        println!("\tppm start");
     }
 
 }
@@ -198,8 +185,8 @@ impl Project {
 #[derive(Args, Debug)]
 pub struct AddPackage {
 
-    /// Package Name takes multiple values
-    pub pkg_name: Vec<String>,
+    /// List of packages to add
+    pub pkg_names: Vec<String>,
 
 }
 
@@ -255,51 +242,35 @@ impl AddPackage {
     }
     
     pub fn add_package(&self) {
-        for pkg_name in self.pkg_name.iter() {
-            if !Path::new(&"project.ini").exists() {  
-                eprint("No project.ini found".to_owned());
+        if !Path::new(&"project.ini").exists() {  
+            eprint("No project.ini found".to_owned());
+            return;
+        }
+        let mut conf = match load_ini() {
+            Ok(conf) => conf,
+            Err(e) => {
+                eprint(e.to_string());
                 return;
             }
-            let mut conf = Ini::load_from_file("project.ini").unwrap();
-            let packages = conf.section_mut(Some("Packages"));
-    
-            match packages {
-                Some(p) => {
-                    if p.contains_key(pkg_name.as_str()) {
-                        eprint(format!("Package '{}' already exists", pkg_name));
-                        return;
-                    }
-                    if self.install_package(pkg_name.clone()) {
-                        p.append(pkg_name, self.get_pkg_version(pkg_name));
-                        match conf.write_to_file("project.ini") {
-                            Ok(_) => {
-                                iprint(format!("Package '{}' added successfully", pkg_name));
-                            },
-                            Err(e) => {
-                                eprint(e.to_string());
-                                exit(1);
-                            }
-                        }
-                    } else {
-                        eprint(format!("Package '{}' failed to install", pkg_name));
+        };
+        for pkg_name in self.pkg_names.iter() {
+            if self.install_package(pkg_name.clone()) {
+                conf.set_to(Some("Packages"), pkg_name.to_owned(), self.get_pkg_version(&pkg_name));
+                match conf.write_to_file("project.ini") {
+                    Ok(_) => {
+                        iprint(format!("Package '{}' added successfully", pkg_name));
+                    },
+                    Err(e) => {
+                        eprint(e.to_string());
+                        exit(1);
                     }
                 }
-                None => {
-                    conf.with_section(Some("Packages"))
-                        .set(pkg_name.as_str(), self.get_pkg_version(pkg_name));
-                    match conf.write_to_file("project.ini") {
-                        Ok(_) => {
-                            self.install_package(pkg_name.clone());
-                            iprint(format!("Package '{}' added successfully", pkg_name));
-                        },
-                        Err(e) => {
-                            eprint(e.to_string());
-                            exit(1);
-                        }
-                    }
-                }
+            } else {
+                eprint(format!("Package '{}' failed to install", pkg_name));
             }
         }
+
+
         
     }
 }
@@ -308,8 +279,8 @@ impl AddPackage {
 #[derive(Args, Debug)]
 pub struct RemovePackage {
 
-    /// Package Name
-    pub pkg_name: String,
+    /// List of packages to remove
+    pub pkg_names: Vec<String>,
 
 }
 
@@ -351,38 +322,44 @@ impl RemovePackage {
             eprint("No project.ini found".to_owned());
             return;
         }
-        let mut conf = Ini::load_from_file("project.ini").unwrap();
-        let packages = conf.section_mut(Some("Packages"));
 
-        for (key, v) in packages.as_ref().unwrap().iter() {
-            println!("{} : {}", key, v);
-        }
-
-        match packages {
-            Some(p) => {
-                if !p.contains_key(self.pkg_name.as_str()) {
-                    eprint(format!("Package '{}' does not exist", self.pkg_name));
+        for pkg_name in self.pkg_names.iter() {
+            let mut conf = match load_ini() {
+                Ok(conf) => conf,
+                Err(e) => {
+                    eprint(e.to_string());
                     return;
                 }
-                if self.uninstall_package(self.pkg_name.to_string()) { 
-                    p.remove(self.pkg_name.as_str());    
-                    match conf.write_to_file("project.ini") {
-                        Ok(_) => {
-                            iprint(format!("Package '{}' removed successfully", self.pkg_name));      
-                        },
-                        Err(e) => {
-                            eprint(e.to_string());
-                            exit(1);
-                        }
+            };
+    
+            let packages = conf.section_mut(Some("Packages"));
+
+            match packages {
+                Some(p) => {
+                    if !p.contains_key(pkg_name.as_str()) {
+                        eprint(format!("Package '{}' does not exist", pkg_name));
+                        return;
                     }
-                } else {
-                    eprint(format!("Package '{}' could not be removed", self.pkg_name));
+                    if self.uninstall_package(pkg_name.to_string()) { 
+                        p.remove(pkg_name.as_str());    
+                        match conf.write_to_file("project.ini") {
+                            Ok(_) => {
+                                iprint(format!("Package '{}' removed successfully", pkg_name));      
+                            },
+                            Err(e) => {
+                                eprint(e.to_string());
+                                exit(1);
+                            }
+                        }
+                    } else {
+                        eprint(format!("Package '{}' could not be removed", pkg_name));
+                    }
+                     
                 }
-                 
-            }
-            None => {
-                eprint(format!("Package '{}' does not exist", self.pkg_name));
-                exit(1);
+                None => {
+                    eprint(format!("Package '{}' does not exist", pkg_name));
+                    exit(1);
+                }
             }
         }
         
@@ -405,12 +382,11 @@ impl RunScript {
             eprint("No project.ini found".to_owned());
             return;
         }
-        let mut conf = match Ini::load_from_file("project.ini")  {
-            Ok(c) => c,
+        let mut conf = match load_ini() {
+            Ok(conf) => conf,
             Err(e) => {
-                eprint("Failed to load project.ini".to_owned());
                 eprint(e.to_string());
-                exit(1);
+                return;
             }
         };
 
@@ -422,8 +398,23 @@ impl RunScript {
                     return;
                 }
                 let cmd_str = s.get(self.script_name.as_str()).unwrap();
-                let mut cmd = process::Command::new("cmd");
-                cmd.args(&["/C", cmd_str]);
+
+                // temporary, later will add support for other os properly
+                // currently missing alot of features
+                let mut cmd;
+                if cfg!(target_os = "windows") {
+                    cmd = process::Command::new("cmd");
+                    cmd.arg("/C");
+                } else if cfg!(target_os = "linux") {
+                    cmd = process::Command::new("bash");
+                    cmd.arg("-c");
+                } else {
+                    eprint("Unsupported OS".to_owned());
+                    return;
+                }
+                cmd.env("PATH", "./venv/Scripts");
+                cmd.arg(cmd_str); 
+
                 match cmd.spawn() {
                     Ok(mut o) => {
                         let _ = o.wait();

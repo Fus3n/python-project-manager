@@ -1,19 +1,18 @@
-// #![allow(dead_code)]
 use colored::*;
-use std::{path::Path, process};
+use std::{path::Path, process::{self, exit}};
+
 
 pub fn eprint(msg: String) {
-    println!("{}: {}", "Error".bright_red().bold(), msg.bright_red());
+    println!("{} {}", "Error:".bright_red().bold(), msg.bright_red());
 }
 
 pub fn wprint(msg: String) {
-    println!("{}: {}", "Warning".bright_yellow().bold(), msg.bright_yellow());
+    println!("{} {}", "Warning:".bright_yellow().bold(), msg.bright_yellow());
 }
 
 pub fn iprint(msg: String) {
-    println!("{}", msg.bright_green().bold());
+    println!("{} {}", "•".bright_green().bold(), msg.bright_green().bold());
 }
-
 
 pub fn project_exists(name: &String) -> bool {
     if Path::new(name).exists() {
@@ -30,8 +29,26 @@ pub fn check_venv_dir_exists() -> bool  {
     return false;
 }
 
+pub fn setup_venv(venv_path: String) {
+    iprint("Setting Up Virtual Environment...".to_string());
+    let venv = process::Command::new("python")
+        .arg("-m")
+        .arg("venv")
+        .arg(venv_path)
+        .output();
+    if venv.is_err() {
+        eprint(venv.unwrap_err().to_string());
+        exit(1);
+    }
+    let venv = venv.unwrap();
+    if !venv.status.success() {
+        eprint(format!("{}", String::from_utf8_lossy(&venv.stderr)));
+        exit(1);
+    }
+}
 
-fn load_ini() -> Result<ini::Ini, String> {
+
+pub fn load_ini() -> Result<ini::Ini, String> {
     match ini::Ini::load_from_file("project.ini") {
         Ok(conf) => Ok(conf),
         Err(e) => {
@@ -45,12 +62,13 @@ pub fn show_project_info() {
         eprint("Could not find project.ini".to_owned());
         return;
     } 
-    let conf = load_ini();
-    if conf.is_err() {
-        eprint(conf.err().unwrap());
-        return;
-    }
-    let conf = conf.unwrap();
+    let conf = match load_ini() {
+        Ok(conf) => conf,
+        Err(e) => {
+            eprint(e.to_string());
+            return;
+        }
+    };
 
     let project = match conf.section(Some("Project")) {
         Some(section) => section,
@@ -87,12 +105,13 @@ pub fn gen_requirements() {
         return;
     } 
 
-    let conf = load_ini();
-    if conf.is_err() {
-        eprint(conf.err().unwrap());
-        return;
-    }
-    let conf = conf.unwrap();
+    let conf = match load_ini() {
+        Ok(conf) => conf,
+        Err(e) => {
+            eprint(e.to_string());
+            return;
+        }
+    };
 
     let packages = conf.section(Some("Packages"));
     if packages.is_none() {
@@ -117,17 +136,18 @@ pub fn start_project() {
         return;
     } 
 
-    let conf = load_ini();
-    if conf.is_err() {
-        eprint(conf.err().unwrap());
-        return;
-    }
-    let conf = conf.unwrap();
+    let conf = match load_ini() {
+        Ok(conf) => conf,
+        Err(e) => {
+            eprint(e.to_string());
+            return;
+        }
+    };
 
     let project = match conf.section(Some("Project")) {
         Some(section) => section,
         None => {
-            eprint("Could not find project section in project.ini".to_owned());
+            eprint("Could not find Project section in project.ini".to_owned());
             return;
         }
     };
@@ -157,4 +177,66 @@ pub fn start_project() {
         }
     }
 
+}
+
+#[derive(PartialEq, Eq)]
+pub enum Manager {
+    Update,
+    Install,
+}
+
+pub fn manage_packages(manage: Manager) {
+    if !Path::new("project.ini").exists() {
+        eprint("Could not find project.ini".to_owned());
+        return;
+    } 
+
+    let conf = match load_ini() {
+        Ok(conf) => conf,
+        Err(e) => {
+            eprint(e.to_string());
+            return;
+        }
+    };
+
+    let packages = match conf.section(Some("Packages")) {
+        Some(section) => section,
+        None => {
+            eprint("Could not find Packages section in project.ini".to_owned());
+            return;
+        }
+    };
+
+    if packages.is_empty() {
+        eprint("No packages to install".to_owned());
+        return;
+    }
+
+    if !check_venv_dir_exists() {
+        wprint("Could not find venv directory".to_owned());
+        setup_venv("./venv".to_owned());
+    }
+
+    let mut cmd = process::Command::new("./venv/Scripts/pip.exe");
+    cmd.arg("install");
+    if manage == Manager::Update {
+        cmd.arg("--upgrade");
+    }
+    for (name, version) in packages.iter() {
+        cmd.arg(format!("{}=={}", name, version));
+    }
+    
+    
+    let venv = cmd.spawn();
+
+    match venv {
+        Ok(mut o) => {
+            let _ = o.wait();
+            let _ = o.kill();
+        }
+        Err(e) => {
+            eprint("Failed to install packages".to_owned());
+            eprint(e.to_string());
+        }
+    }
 }

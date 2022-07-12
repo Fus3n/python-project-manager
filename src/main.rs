@@ -3,14 +3,16 @@ mod utils;
 
 use project_creator::Action;
 use clap::Parser;
+use utils::Manager;
 
 
 const VERSION : &str = env!("CARGO_PKG_VERSION");
 const ABOUT: &'static str = env!("CARGO_PKG_DESCRIPTION");
+const AUTHOR : &'static str = env!("CARGO_PKG_AUTHORS");
 
 /// Python Project Manager
 #[derive(Parser, Debug)]
-#[clap(author="Fusen", version=VERSION, about=ABOUT, long_about = None)]
+#[clap(author=AUTHOR, version=VERSION, about=ABOUT, long_about = None)]
 struct Cli {
 
     #[clap(subcommand)]
@@ -28,5 +30,7 @@ fn main() {
         Action::Info => utils::show_project_info(),
         Action::Gen => utils::gen_requirements(),
         Action::Start => utils::start_project(),
+        Action::Install => utils::manage_packages(Manager::Install),
+        Action::Update => utils::manage_packages(Manager::Update),
     }
 }
