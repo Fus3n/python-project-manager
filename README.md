@@ -15,6 +15,13 @@ A Command-line tool to create, manage and deploy your python projects
     - [⏬ Install Packages from project.ini](#⏬-install-packages-from-projectini)
   - [Build From Source](#build-from-source)
 
+</br>
+
+| 🔗 | [Try it out](https://github.com/Fus3n/python-project-manager/releases)  |
+|---------------|:------------------------|
+
+</br>
+
 ## Main Features
 
 - Virtual Environment Manager
