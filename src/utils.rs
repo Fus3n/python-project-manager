@@ -29,6 +29,24 @@ pub fn check_venv_dir_exists() -> bool  {
     return false;
 }
 
+pub fn get_pkg_version(pkg: &String) -> String {
+    let url = format!("https://pypi.org/pypi/{}/json", pkg);
+    let resp = reqwest::blocking::get(&url);
+    match resp {
+        Ok(resp) => {
+            let json: serde_json::Value = resp.json().unwrap();
+            let version = json["info"]["version"].as_str().unwrap();
+            version.to_string()
+        },
+        Err(e) => {
+            eprint("Failed to retrieve package version".to_string());
+            eprint(e.to_string());
+            exit(1);
+        }
+    }
+    
+}
+
 pub fn setup_venv(venv_path: String) {
     iprint("Setting Up Virtual Environment...".to_string());
     let venv = process::Command::new("python")
@@ -55,6 +73,7 @@ pub fn load_ini() -> Result<ini::Ini, String> {
             return Err(format!("Could not load project.ini: {}", e));
         }
     }
+
 }
 
 pub fn show_project_info() {
@@ -86,8 +105,20 @@ pub fn show_project_info() {
     println!("{}: {}", "Version".green().bold(), version.bright_red().bold());
     println!("{}: {}", "Description".green().bold() ,description.bright_white().bold());
     
+    let scripts = conf.section(Some("Scripts"));
+    if scripts.is_some() {
+        println!("");
+        let count = scripts.unwrap().len();
+        println!("-- {} {} --", count.to_string().green().bold(),  if count == 1 { "Script".to_owned() } else { "Scripts".to_owned() });
+        for (name, cmd) in scripts.unwrap().iter() {
+            println!("{}: {}", name.bright_yellow().bold(), cmd.green().bold());
+        }
+
+    }
+
     let packages = conf.section(Some("Packages"));
     if packages.is_some() {
+        println!("");
         let count = packages.unwrap().len();
         println!("-- {} {} --", count.to_string().green().bold(),  if count == 1 { "Package".to_owned() } else { "Packages".to_owned() });
         for (name, version) in packages.unwrap().iter().take(10) {
@@ -97,6 +128,7 @@ pub fn show_project_info() {
             println!("... and {} more", packages.unwrap().len() - 10);
         }
     }
+    
 }
 
 pub fn gen_requirements() {
@@ -179,13 +211,7 @@ pub fn start_project() {
 
 }
 
-#[derive(PartialEq, Eq)]
-pub enum Manager {
-    Update,
-    Install,
-}
-
-pub fn manage_packages(manage: Manager) {
+pub fn install_packages() {
     if !Path::new("project.ini").exists() {
         eprint("Could not find project.ini".to_owned());
         return;
@@ -219,9 +245,6 @@ pub fn manage_packages(manage: Manager) {
 
     let mut cmd = process::Command::new("./venv/Scripts/pip.exe");
     cmd.arg("install");
-    if manage == Manager::Update {
-        cmd.arg("--upgrade");
-    }
     for (name, version) in packages.iter() {
         cmd.arg(format!("{}=={}", name, version));
     }
@@ -232,11 +255,93 @@ pub fn manage_packages(manage: Manager) {
     match venv {
         Ok(mut o) => {
             let _ = o.wait();
-            let _ = o.kill();
         }
         Err(e) => {
             eprint("Failed to install packages".to_owned());
             eprint(e.to_string());
         }
     }
+}
+
+
+pub fn update_packages() {
+    if !Path::new("project.ini").exists() {
+        eprint("Could not find project.ini".to_owned());
+        return;
+    } 
+    
+
+    let mut conf = match ini::Ini::load_from_file("project.ini") {
+        Ok(conf) => conf,
+        Err(e) => {
+            eprint(e.to_string());
+            return;
+        }
+    };
+
+
+    let packages = match conf.section(Some("Packages")) {
+        Some(section) => section,
+        None => {
+            eprint("Could not find Packages section in project.ini".to_owned());
+            return;
+        }
+    };
+
+
+    if packages.is_empty() {
+        eprint("No packages to install".to_owned());
+        return;
+    }
+
+    if !check_venv_dir_exists() {
+        wprint("Could not find venv directory".to_owned());
+        setup_venv("./venv".to_owned());
+    }
+
+
+    let mut cmd_args: Vec<(String, String)> = vec![];
+    for (name, _) in packages.iter() {
+        let latest_ver = get_pkg_version(&name.to_owned());
+        cmd_args.push((name.to_owned(), latest_ver));
+    }
+
+
+    /*
+    looping to check if each package was successfully installed
+    and add it to the ini file if it was
+    */
+    let mut conf_pkgs: Vec<(String, String)> = vec![];
+
+    for (name, ver) in cmd_args {
+        let mut cmd = process::Command::new("./venv/Scripts/pip.exe");
+        cmd.arg("install");
+        cmd.arg(format!("{}=={}", name, ver));
+    
+        let venv = cmd.spawn();
+    
+        match venv {
+            Ok(mut o) => {
+                let _ = o.wait();
+                conf_pkgs.push((name.to_owned(), ver.to_owned()));
+                iprint(format!("Updated {}", name));
+            }
+            Err(e) => {
+                eprint(format!("Failed to update '{}'", name));
+                eprint(e.to_string());
+            }
+        }
+    }
+
+    for (name, ver) in conf_pkgs {
+        conf.set_to(Some("Packages"), name.to_string(), ver);
+    }
+
+    match conf.write_to_file("project.ini") {
+        Ok(_) => {}
+        Err(e) => {
+            eprint(e.to_string());
+        }
+    }
+    
 }

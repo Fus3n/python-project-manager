@@ -2,11 +2,24 @@
 
 A Command-line tool to create, manage and deploy your python projects
 
+## Table of Contents
+
+- [PPM](#ppm)
+  - [Main Features](#main-features)
+    - [Create a Project](#create-a-project)
+    - [project.ini file](#projectini-file)
+    - [Project](#project)
+    - [Install/Uninstall Packages](#install-uninstall-packages)
+    - [Run Scripts](#run-scripts)
+    - [⚙️ Generate requirements.txt](#⚙️-generate-requirementstxt)
+    - [⏬ Install Packages from project.ini](#⏬-install-packages-from-projectini)
+  - [Build From Source](#build-from-source)
+
 ## Main Features
 
-* Virtual Environment
-* Package Manager (pip)
-* Scripts (run test, build, etc)
+- Virtual Environment Manager
+- Package Manager (using pip)
+- Scripts (run test, build, etc)
 
 ### Create a Project
 
@@ -44,12 +57,19 @@ $ ppm info
 Project: example
 Version: 0.1.0
 Description: an example project
+
+-- 4 Scripts --
+test: python -m unittest src/test.py
+serve: python -m http.server
+sayhello: echo Hello world
+upgrade: python -m pip install --upgrade pip
+
 -- 2 Packages --
 pyopt_tools==0.7
 numpy==1.23.1
 ```
 
-### Install/Uninstall Packages/Modules
+### Install/Uninstall Packages
 
 You can add or remove multiple packages at the same time.
 This will install it into your venv
@@ -82,4 +102,12 @@ It will also create a virtual environment if it doesn't exist
 
 ```bash
 ppm install
+```
+
+## Build From Source
+
+```bash
+git clone https://github.com/Fus3n/python-project-manager
+cd python-project-manager
+cargo build --release
 ```

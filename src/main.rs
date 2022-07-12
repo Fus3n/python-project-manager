@@ -3,7 +3,6 @@ mod utils;
 
 use project_creator::Action;
 use clap::Parser;
-use utils::Manager;
 
 
 const VERSION : &str = env!("CARGO_PKG_VERSION");
@@ -30,7 +29,7 @@ fn main() {
         Action::Info => utils::show_project_info(),
         Action::Gen => utils::gen_requirements(),
         Action::Start => utils::start_project(),
-        Action::Install => utils::manage_packages(Manager::Install),
-        Action::Update => utils::manage_packages(Manager::Update),
+        Action::Install => utils::install_packages(),
+        Action::Update => utils::update_packages(),
     }
 }

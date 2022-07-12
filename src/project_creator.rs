@@ -2,9 +2,7 @@ use clap::{Subcommand, Args};
 use ini::Ini;
 
 use std::{fs, process::{exit, self}, io::Write, path::Path, time::Instant};
-
 use crate::utils::*;
-
 
 
 const STARTER_SOURCE_PY: &'static str = "\r
@@ -14,7 +12,6 @@ def main():
 if __name__ == '__main__':
     main()
 ";
-
 
 
 #[derive(Subcommand, Debug)]
@@ -67,12 +64,10 @@ pub struct Project {
     git: bool,
 
     /// Don't Create Virtual Environment
-    #[clap(short = 'n', long = "no-venv", takes_value = false)]
+    #[clap(short = 'e', long = "no-venv", takes_value = false)]
     no_venv: bool,
 
 }
-
-
 
 
 impl Project {
@@ -135,13 +130,32 @@ impl Project {
         .set("version", self.version.as_str())
         .set("description", self.description.as_str())
         .set("main", "./src/main.py");
-        conf.with_section(Some("Packages"));
-        conf.with_section(Some("Scripts"));
-        conf.write_to_file(format!("{}/project.ini", self.name)).unwrap();
+        conf.with_section(Some("Packages"))
+            .set("#ignore_this", "#ignore_this");
+        conf.with_section(Some("Scripts"))
+            .set("upgrade-pip", "python -m pip install --upgrade pip");
+
+        match conf.write_to_file(format!("{}/project.ini", self.name)){
+            Ok(_) => (),
+            Err(e) => {
+                eprint(e.to_string());
+                exit(1);
+            }
+        }
+
+        // to remove #ignore_this otherwise it does't write Section to file if nothing is added to section
+        let mut conf = Ini::load_from_file(format!("{}/project.ini", self.name)).unwrap();
+        let  pkgs = conf.section_mut(Some("Packages")).unwrap();
+        pkgs.remove_all("#ignore_this");
+        match conf.write_to_file(format!("{}/project.ini", self.name)){
+            Ok(_) => (),
+            Err(e) => {
+                eprint(e.to_string());
+                exit(1);
+            }
+        }
+
     }
-
-    
-
 
     pub fn create_project(&self) {
         let start = Instant::now();
@@ -175,8 +189,8 @@ impl Project {
         let elapsed = start.elapsed();
         iprint(format!("Completed in {}s", elapsed.as_secs()));
         println!("\nTo get started:");
-        println!("\tcd {}", self.name);
-        println!("\tppm start");
+        println!("  cd {}", self.name);
+        println!("  ppm start\n");
     }
 
 }
@@ -192,24 +206,6 @@ pub struct AddPackage {
 
 impl AddPackage {
 
-    fn get_pkg_version(&self, pkg: &String) -> String {
-        let url = format!("https://pypi.org/pypi/{}/json", pkg);
-        let resp = reqwest::blocking::get(&url);
-        match resp {
-            Ok(resp) => {
-                let json: serde_json::Value = resp.json().unwrap();
-                let version = json["info"]["version"].as_str().unwrap();
-                version.to_string()
-            },
-            Err(e) => {
-                eprint("Failed to retrieve package version".to_string());
-                eprint(e.to_string());
-                exit(1);
-            }
-        }
-        
-    }
-
     fn install_package(&self, pkg: String) -> bool{
         if !check_venv_dir_exists() {
             eprint("Virtual Environment Not Found".to_owned());
@@ -219,8 +215,12 @@ impl AddPackage {
         let venv = process::Command::new("./venv/Scripts/pip.exe")
             .arg("install")
             .arg(pkg)
-            .spawn()
-            .unwrap();
+            .spawn();
+        if venv.is_err() {
+            eprint(venv.unwrap_err().to_string());
+            return false;
+        }
+        let venv = venv.unwrap();           
 
         match venv.wait_with_output() {
             Ok(output) => {
@@ -238,7 +238,18 @@ impl AddPackage {
             }
         }
 
+    }
 
+    /// parse name and version of package if it was name==version
+    fn parse_version(&self, pkg: String) -> (String, String) {
+        if pkg.contains("==") {
+            let mut pkg_split = pkg.split("==");
+            let pkg_name = pkg_split.next().unwrap();
+            let pkg_version = pkg_split.next().unwrap();
+            return (pkg_name.to_string(), pkg_version.to_string());
+        } else {
+            return (pkg.to_string(), "".to_string());
+        }
     }
     
     pub fn add_package(&self) {
@@ -254,11 +265,21 @@ impl AddPackage {
             }
         };
         for pkg_name in self.pkg_names.iter() {
+            let (vname, ver) = self.parse_version(pkg_name.clone());
+
             if self.install_package(pkg_name.clone()) {
-                conf.set_to(Some("Packages"), pkg_name.to_owned(), self.get_pkg_version(&pkg_name));
+                conf.set_to(Some("Packages"), vname.clone(), 
+                    if ver.len() > 0 {
+                        ver
+                    } else {
+                        // if no version, set to latest
+                        get_pkg_version(&pkg_name)
+                    }
+                );
+
                 match conf.write_to_file("project.ini") {
                     Ok(_) => {
-                        iprint(format!("Package '{}' added successfully", pkg_name));
+                        iprint(format!("Package '{}' added successfully", &vname));
                     },
                     Err(e) => {
                         eprint(e.to_string());
@@ -266,24 +287,19 @@ impl AddPackage {
                     }
                 }
             } else {
-                eprint(format!("Package '{}' failed to install", pkg_name));
+                eprint(format!("Package '{}' failed to install", &vname));
             }
         }
-
-
-        
     }
 }
 
 
 #[derive(Args, Debug)]
 pub struct RemovePackage {
-
     /// List of packages to remove
     pub pkg_names: Vec<String>,
 
 }
-
 
 impl RemovePackage {
     
@@ -340,7 +356,7 @@ impl RemovePackage {
                         eprint(format!("Package '{}' does not exist", pkg_name));
                         return;
                     }
-                    if self.uninstall_package(pkg_name.to_string()) { 
+                    if self.uninstall_package(pkg_name.to_string()) {
                         p.remove(pkg_name.as_str());    
                         match conf.write_to_file("project.ini") {
                             Ok(_) => {
