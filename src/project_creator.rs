@@ -1,7 +1,7 @@
 use clap::{Subcommand, Args};
 use ini::Ini;
 
-use std::{fs, process::{exit, self}, io::Write, path::Path, time::Instant};
+use std::{fs, process::{Command}, io::Write, path::Path, time::Instant};
 use crate::utils::*;
 
 
@@ -72,41 +72,43 @@ pub struct Project {
 
 impl Project {
 
-    fn create_git(&self) {
+    fn create_git(&self) -> Result<(), ()> {
         if self.git {
-            let git_repo = process::Command::new("git")
+            let git_repo = Command::new("git")
                 .arg("init")
                 .arg(format!("{}/", self.name))
                 .output();
             if git_repo.is_err() {
                 eprint(git_repo.unwrap_err().to_string());
-                exit(1);
+                return Err(());
             }
             // add build to gitignore
             let git_ignore = fs::File::create(format!("{}/.gitignore", self.name));
             if git_ignore.is_err() {
                 eprint(git_ignore.unwrap_err().to_string());
-                exit(1);
+                return Err(());
             }
             let mut git_ignore = git_ignore.unwrap();
             match git_ignore.write_all(b"/build\n") {
-                Ok(_) => (),
+                Ok(_) => Ok(()),
                 Err(e) => {
                     eprint(e.to_string());
                     git_ignore.flush().unwrap();
-                    exit(1);
+                    return Err(());
                 }
             }
+        } else {
+            Ok(())
         }
         
     }
     
-    fn create_boilerplate_files(&self) {
+    fn create_boilerplate_files(&self) -> Result<(), ()> {
         let proj_dest = format!("{}/src", self.name);
         let main_file = fs::File::create(format!("{}/main.py", proj_dest));
         if main_file.is_err() {
             eprint(main_file.unwrap_err().to_string());
-            exit(1);
+            return Err(());
         }
         // write started source
         let mut main_file = main_file.unwrap();
@@ -116,14 +118,15 @@ impl Project {
                 eprint(e.to_string());
                 // close
                 main_file.flush().unwrap();
-                exit(1);
+                return Err(());
             }
         }
         // close files
         main_file.flush().unwrap();
+        Ok(())
     }
 
-    fn save_config(&self) {
+    fn save_config(&self) -> Result<(), ()> {
         let mut conf = Ini::new();
         conf.with_section(Some("Project"))
         .set("name", self.name.as_str())
@@ -139,7 +142,7 @@ impl Project {
             Ok(_) => (),
             Err(e) => {
                 eprint(e.to_string());
-                exit(1);
+                return Err(());
             }
         }
 
@@ -148,10 +151,10 @@ impl Project {
         let  pkgs = conf.section_mut(Some("Packages")).unwrap();
         pkgs.remove_all("#ignore_this");
         match conf.write_to_file(format!("{}/project.ini", self.name)){
-            Ok(_) => (),
+            Ok(_) => Ok(()),
             Err(e) => {
                 eprint(e.to_string());
-                exit(1);
+                return Err(());
             }
         }
 
@@ -162,29 +165,38 @@ impl Project {
         let proj_dest = format!("{}/src", self.name);
         if project_exists(&self.name) {
             eprint(format!("Project With Name '{}' Already Exists", self.name));
-            exit(1);
+            return;
         }
         let dir_create = fs::create_dir_all(&proj_dest);
         if dir_create.is_err() {
             eprint(dir_create.unwrap_err().to_string());
-            exit(1);
+            return;
         } 
         
         // create main.py file
-        self.create_boilerplate_files();
+        if self.create_boilerplate_files().is_err() {
+            return;
+        }
 
         // setup git
-        self.create_git();
+        if self.create_git().is_err() {
+            return;
+        }
 
         // venv
         if !self.no_venv {
-            setup_venv(format!("{}/venv", self.name));
+            if setup_venv(format!("{}/venv", self.name)).is_err() {
+                eprint("Failed to setup venv".to_owned());
+                return;
+            }
         } else {
             wprint("Virtual environment is disabled, some commands might not work".to_string());
         }
 
         // save
-        self.save_config();
+        if self.save_config().is_err() {
+           return;
+        }
 
         let elapsed = start.elapsed();
         iprint(format!("Completed in {}s", elapsed.as_secs()));
@@ -212,7 +224,7 @@ impl AddPackage {
             return false;
         }
         iprint(format!("Installing '{}'", pkg));
-        let venv = process::Command::new("./venv/Scripts/pip.exe")
+        let venv = Command::new("./venv/Scripts/pip.exe")
             .arg("install")
             .arg(pkg)
             .spawn();
@@ -265,17 +277,18 @@ impl AddPackage {
             }
         };
         for pkg_name in self.pkg_names.iter() {
-            let (vname, ver) = self.parse_version(pkg_name.clone());
+            let (vname, mut ver) = self.parse_version(pkg_name.clone());
 
             if self.install_package(pkg_name.clone()) {
-                conf.set_to(Some("Packages"), vname.clone(), 
-                    if ver.len() > 0 {
-                        ver
-                    } else {
-                        // if no version, set to latest
-                        get_pkg_version(&pkg_name)
+                if ver.len() == 0 {
+                    // if no version, set to latest
+                    let v = get_pkg_version(&pkg_name);
+                    if v.is_err() {
+                        return;
                     }
-                );
+                    ver = v.unwrap();
+                } 
+                conf.set_to(Some("Packages"), vname.clone(),  ver);
 
                 match conf.write_to_file("project.ini") {
                     Ok(_) => {
@@ -283,7 +296,7 @@ impl AddPackage {
                     },
                     Err(e) => {
                         eprint(e.to_string());
-                        exit(1);
+                        return;
                     }
                 }
             } else {
@@ -310,7 +323,7 @@ impl RemovePackage {
         }
         iprint(format!("Uninstalling {}", pkg));
         // print any out put to stdout
-        let venv = process::Command::new("./venv/Scripts/pip.exe")
+        let venv = Command::new("./venv/Scripts/pip.exe")
             .arg("uninstall")
             .arg(pkg)
             .spawn()
@@ -364,7 +377,7 @@ impl RemovePackage {
                             },
                             Err(e) => {
                                 eprint(e.to_string());
-                                exit(1);
+                                return;
                             }
                         }
                     } else {
@@ -374,7 +387,7 @@ impl RemovePackage {
                 }
                 None => {
                     eprint(format!("Package '{}' does not exist", pkg_name));
-                    exit(1);
+                    return;
                 }
             }
         }
@@ -419,10 +432,10 @@ impl RunScript {
                 // currently missing alot of features
                 let mut cmd;
                 if cfg!(target_os = "windows") {
-                    cmd = process::Command::new("cmd");
+                    cmd = Command::new("cmd");
                     cmd.arg("/C");
                 } else if cfg!(target_os = "linux") {
-                    cmd = process::Command::new("bash");
+                    cmd = Command::new("bash");
                     cmd.arg("-c");
                 } else {
                     eprint("Unsupported OS".to_owned());
@@ -437,13 +450,13 @@ impl RunScript {
                     },
                     Err(e) => {
                         eprint(e.to_string());
-                        exit(1);
+                        return;
                     }
                 }
             }
             None => {
                 eprint(format!("Script '{}' does not exist", self.script_name));
-                exit(1);
+                return;
             }
         }
     }

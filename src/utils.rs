@@ -1,13 +1,13 @@
 use colored::*;
-use std::{path::Path, process::{self, exit}};
+use std::{path::Path, process::{Command, Stdio}};
 
 
 pub fn eprint(msg: String) {
-    println!("{} {}", "Error:".bright_red().bold(), msg.bright_red());
+    println!("{} {}", "error:".bright_red().bold(), msg.bright_red());
 }
 
 pub fn wprint(msg: String) {
-    println!("{} {}", "Warning:".bright_yellow().bold(), msg.bright_yellow());
+    println!("{} {}", "warning:".bright_yellow().bold(), msg.bright_yellow());
 }
 
 pub fn iprint(msg: String) {
@@ -29,40 +29,41 @@ pub fn check_venv_dir_exists() -> bool  {
     return false;
 }
 
-pub fn get_pkg_version(pkg: &String) -> String {
+pub fn get_pkg_version(pkg: &String) -> Result<String, ()> {
     let url = format!("https://pypi.org/pypi/{}/json", pkg);
     let resp = reqwest::blocking::get(&url);
     match resp {
         Ok(resp) => {
             let json: serde_json::Value = resp.json().unwrap();
             let version = json["info"]["version"].as_str().unwrap();
-            version.to_string()
+            Ok(version.to_string())
         },
         Err(e) => {
             eprint("Failed to retrieve package version".to_string());
             eprint(e.to_string());
-            exit(1);
+            Err(())
         }
     }
     
 }
 
-pub fn setup_venv(venv_path: String) {
+pub fn setup_venv(venv_path: String) -> Result<(), ()> {
     iprint("Setting Up Virtual Environment...".to_string());
-    let venv = process::Command::new("python")
+    let venv = Command::new("python")
         .arg("-m")
         .arg("venv")
         .arg(venv_path)
         .output();
     if venv.is_err() {
         eprint(venv.unwrap_err().to_string());
-        exit(1);
+        return Err(());
     }
     let venv = venv.unwrap();
     if !venv.status.success() {
         eprint(format!("{}", String::from_utf8_lossy(&venv.stderr)));
-        exit(1);
+        return Err(());
     }
+    Ok(())
 }
 
 
@@ -186,9 +187,9 @@ pub fn start_project() {
 
     match project.get("main") {
         Some(main) => {
-            let venv = process::Command::new("./venv/Scripts/python.exe")
+            let venv = Command::new("./venv/Scripts/python.exe")
                 .arg(main)
-                .stdin(process::Stdio::piped())
+                .stdin(Stdio::piped())
                 .spawn();
             
             match venv {
@@ -240,10 +241,14 @@ pub fn install_packages() {
 
     if !check_venv_dir_exists() {
         wprint("Could not find venv directory".to_owned());
-        setup_venv("./venv".to_owned());
+        if setup_venv("./venv".to_owned()).is_err() {
+            eprint("Failed to setup venv".to_owned());
+            return;
+        }
+        
     }
 
-    let mut cmd = process::Command::new("./venv/Scripts/pip.exe");
+    let mut cmd = Command::new("./venv/Scripts/pip.exe");
     cmd.arg("install");
     for (name, version) in packages.iter() {
         cmd.arg(format!("{}=={}", name, version));
@@ -296,25 +301,34 @@ pub fn update_packages() {
 
     if !check_venv_dir_exists() {
         wprint("Could not find venv directory".to_owned());
-        setup_venv("./venv".to_owned());
+        if setup_venv("./venv".to_owned()).is_err() {
+            eprint("Failed to setup venv".to_owned());
+            return;
+        }
+
     }
 
 
     let mut cmd_args: Vec<(String, String)> = vec![];
     for (name, _) in packages.iter() {
         let latest_ver = get_pkg_version(&name.to_owned());
+        if latest_ver.is_err() {
+            eprint(format!("Could not find latest version of {}", name));
+            continue;
+        }
+        let latest_ver = latest_ver.unwrap();
         cmd_args.push((name.to_owned(), latest_ver));
     }
 
 
     /*
-    looping to check if each package was successfully installed
-    and add it to the ini file if it was
+        looping to check if each package was successfully installed
+        and add it to the ini file if it was
     */
     let mut conf_pkgs: Vec<(String, String)> = vec![];
 
     for (name, ver) in cmd_args {
-        let mut cmd = process::Command::new("./venv/Scripts/pip.exe");
+        let mut cmd = Command::new("./venv/Scripts/pip.exe");
         cmd.arg("install");
         cmd.arg(format!("{}=={}", name, ver));
     
