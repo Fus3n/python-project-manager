@@ -7,12 +7,12 @@ A Command-line tool to create, manage and deploy your python projects
 - [PPM](#ppm)
   - [Main Features](#main-features)
     - [Create a Project](#create-a-project)
-    - [project.ini file](#projectini-file)
+    - [project.toml file](#projectini-file)
     - [Project](#project)
     - [Install/Uninstall Packages](#install-uninstall-packages)
     - [Run Scripts](#run-scripts)
     - [⚙️ Generate requirements.txt](#⚙️-generate-requirementstxt)
-    - [⏬ Install Packages from project.ini](#⏬-install-packages-from-projectini)
+    - [⏬ Install Packages from project.toml](#⏬-install-packages-from-projectini)
   - [Build From Source](#build-from-source)
 
 </br>
@@ -25,7 +25,7 @@ A Command-line tool to create, manage and deploy your python projects
 ## Main Features
 
 - Virtual Environment Manager
-- Package Manager (using pip)
+- Package Manager (uses pip)
 - Scripts (run test, build, etc)
 
 ### Create a Project
@@ -36,23 +36,23 @@ cd <project-name>
 ppm start
 ```
 
-### project.ini file
+### project.toml file
 
-```ini
-[Project]
-name=example
-version=0.1.0
-description="an example project"
-main=./src/main.py
+```toml
+[project]
+name = "example"
+version = "0.1.0"
+description = "an example project"
+main_script = "./src/main.py"
 
-[Packages]
-pyopt_tools=0.7
-numpy=1.23.1
+[packages]
+pyopt_tools = "0.7"
+numpy = "1.23.1"
 
-[Scripts]
-test="python -m unittest src/test.py"
-serve="python -m http.server"
-sayhello="echo Hello world!"
+[scripts]
+test = "python -m unittest src/test.py"
+serve = "python -m http.server"
+sayhello = "echo Hello world!"
 ```
 
 ### Project
@@ -61,6 +61,7 @@ Get an overview of your project
 
 ```bash
 $ ppm info
+
 Project: example
 Version: 0.1.0
 Description: an example project
@@ -74,6 +75,7 @@ upgrade: python -m pip install --upgrade pip
 -- 2 Packages --
 pyopt_tools==0.7
 numpy==1.23.1
+
 ```
 
 ### Install/Uninstall Packages
@@ -83,7 +85,7 @@ This will install it into your venv
 
 ```bash
 ppm add <package-names>
-ppm remove <package-names>
+ppm rm <package-names>
 ```
 
 ### Run Scripts
@@ -96,19 +98,24 @@ ppm run <script-name>
 
 ### ⚙️ Generate requirements.txt
 
-Generates requirements.txt from packges listed in project.ini
+Generates requirements.txt from packges listed in project.toml
 
 ```bash
 ppm gen
 ```
 
-### ⏬ install Packages from project.ini
+### ⏬ install Packages from project.toml
 
-This will try to install all the packages listed in project.ini
-It will also create a virtual environment if it doesn't exist
+This will try to install all the packages listed in project.toml
 
 ```bash
 ppm install
+```
+
+Install from requirements.txt
+
+```bash
+ppm install -r requirements.txt
 ```
 
 ## Build From Source

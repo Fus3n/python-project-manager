@@ -1,7 +1,9 @@
-mod project_creator;
+mod project_managers;
 mod utils;
+mod settings;
+mod ppm_functions;
 
-use project_creator::Action;
+use project_managers::Action;
 use clap::Parser;
 
 
@@ -24,12 +26,12 @@ fn main() {
     match &cli.command {
         Action::New(project) => project.create_project(),
         Action::Add(add_proj) => add_proj.add_package(),
-        Action::Remove(rp) => rp.remove_package(),
+        Action::Rm(rp) => rp.remove_package(),
         Action::Run(run) => run.run_script(),
-        Action::Info => utils::show_project_info(),
-        Action::Gen => utils::gen_requirements(),
-        Action::Start => utils::start_project(),
-        Action::Install => utils::install_packages(),
-        Action::Update => utils::update_packages(),
+        Action::Install(installer) => installer.install_packages(),
+        Action::Info => ppm_functions::show_project_info(),
+        Action::Gen => ppm_functions::gen_requirements(),
+        Action::Start => ppm_functions::start_project(),
+        Action::Update => ppm_functions::update_packages(),
     }
 }
