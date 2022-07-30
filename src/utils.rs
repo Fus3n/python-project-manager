@@ -14,8 +14,13 @@ pub fn iprint(msg: String) {
     println!("{} {}", "•".bright_green().bold(), msg.bright_green().bold());
 }
 
-pub fn project_exists(name: &String) -> bool {
-    if Path::new(name).exists() {
+pub fn project_exists(name: &String, is_init: bool) -> bool {
+    if is_init {
+        if Path::new("project.toml").exists() {
+            return true;
+        }
+    }
+    else if Path::new(name).exists() {
         if Path::new(&format!("{}/project.toml", name)).exists() {
             return true;
         }
@@ -127,3 +132,5 @@ pub fn install_package(pkg: String) -> bool {
     }
 
 }
+
+

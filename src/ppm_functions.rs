@@ -17,8 +17,24 @@ pub fn show_project_info() {
             return;
         }
     };
-
     println!("");
+
+    // get pyhon versiopn from ./venv/Scripts/python
+    match Command::new("./venv/Scripts/python.exe")
+        .arg("--version")
+        .stdout(Stdio::piped())
+        .output()
+    {
+        Ok(output) => {
+            let version = String::from_utf8_lossy(&output.stdout);
+            let vers = version.split(" ").collect::<Vec<&str>>();
+            println!("{}: {}", vers[0].bold().bright_purple(), vers[1].bold().red());
+        },
+        Err(_) => {
+            eprint("failed to get python version".to_string());
+        }
+    };
+
     println!("{}: {}", "Project".green().bold(), conf.project.name.bright_cyan().bold());
     println!("{}: {}", "Version".green().bold(), conf.project.version.bright_red().bold());
     println!("{}: {}", "Description".green().bold(), conf.project.description.bright_white().bold());

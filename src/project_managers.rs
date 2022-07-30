@@ -20,6 +20,9 @@ pub enum Action {
     /// Create New Project With Given Name
     New(ProjectConf),
 
+    /// Initialize Project In Current Directory
+    Init(ProjectConf),
+
     /// Add new packages to project 
     Add(AddPackage),
 
@@ -45,9 +48,154 @@ pub enum Action {
     Update,
 }
 
+pub struct ProjectCreator {
+    project: ProjectConf,
+    is_init: bool,
+}
 
+impl ProjectCreator {
+    fn new(project: ProjectConf, is_init: bool) -> ProjectCreator {
+        ProjectCreator {
+            project: project,
+            is_init: is_init,
+        }
+    }
 
-#[derive(Args, Debug)]
+    fn get_path_with(&self, path: &str) -> String{
+        if self.is_init {
+            return path.to_string();
+        } else{
+            return format!("{}/{}", self.project.name, path);
+        }
+    }
+
+    fn create_git(&self) -> Result<(), ()> {
+        if self.project.git {
+            let path = if self.is_init { ".".to_string() } else { format!("{}/", self.project.name) };
+            let git_repo = Command::new("git")
+                .arg("init")
+                .arg(path)
+                .output();
+            if git_repo.is_err() {
+                eprint(git_repo.unwrap_err().to_string());
+                return Err(());
+            }
+            // add build to gitignore
+            let git_ignore = fs::File::create(self.get_path_with(".gitignore"));
+            if git_ignore.is_err() {
+                eprint(git_ignore.unwrap_err().to_string());
+                return Err(());
+            }
+            let mut git_ignore = git_ignore.unwrap();
+            match git_ignore.write_all(b"/build\n") {
+                Ok(_) => Ok(()),
+                Err(e) => {
+                    eprint(e.to_string());
+                    git_ignore.flush().unwrap();
+                    return Err(());
+                }
+            }
+        } else {
+            Ok(())
+        }
+        
+    }
+    
+    fn create_boilerplate_files(&self) -> Result<(), ()> {
+        let proj_dest = self.get_path_with("src");
+        let main_file = fs::File::create(format!("{}/main.py", proj_dest));
+        if main_file.is_err() {
+            eprint(main_file.unwrap_err().to_string());
+            return Err(());
+        }
+        // write started source
+        let mut main_file = main_file.unwrap();
+        match main_file.write_all(STARTER_SOURCE_PY.as_bytes()) {
+            Ok(_) => (),
+            Err(e) => {
+                eprint(e.to_string());
+                // close
+                main_file.flush().unwrap();
+                return Err(());
+            }
+        }
+        // close files
+        main_file.flush().unwrap();
+        Ok(())
+    }
+
+    fn save_config(&self) -> Result<(), ()> {
+        let mut conf = Config::new(
+            Project::new(
+                self.project.name.clone(),
+                self.project.version.clone(),
+                self.project.description.clone(),
+                if self.is_init { "./main.py".to_string() } else { "./src/main.py".to_string() }  
+            ),
+            HashMap::new(),
+            HashMap::new(),
+        );
+        conf.scripts.insert("upgrade-pip".to_string(), "python -m pip install --upgrade pip".to_string());
+
+        match conf.write_to_file(self.get_path_with("project.toml").as_str()){
+            Ok(_) => Ok(()),
+            Err(e) => {
+                eprint(e.to_string());
+                return Err(());
+            }
+        }
+    }
+
+    pub fn create_project(&self) {
+        let start = Instant::now();
+        let proj_dest = self.get_path_with("src");
+        if project_exists(&self.project.name,  self.is_init) {
+            eprint(format!("Project With Name '{}' Already Exists", &self.project.name));
+            return;
+        }
+        let dir_create = fs::create_dir_all(&proj_dest);
+        if dir_create.is_err() {
+            eprint(dir_create.unwrap_err().to_string());
+            return;
+        } 
+        
+        // create main.py file
+        if self.create_boilerplate_files().is_err() {
+            return;
+        }
+
+        // setup git
+        if self.create_git().is_err() {
+            return;
+        }
+
+        // venv
+        if !self.project.no_venv {
+            if setup_venv(self.get_path_with("venv")).is_err() {
+                eprint("Failed to setup venv".to_owned());
+                return;
+            }
+        } else {
+            wprint("Virtual environment is disabled, some commands might not work".to_string());
+        }
+
+        // save
+        if self.save_config().is_err() {
+           return;
+        }
+
+        let elapsed = start.elapsed();
+        iprint(format!("{} in {}s", "Completed".green(), elapsed.as_secs()));
+        println!("\nTo get started:");
+        if !self.is_init {
+            println!("  cd {}", self.project.name.blue());
+        }
+        println!("  {} start\n", "ppm".red());
+    }
+
+}
+
+#[derive(Args, Debug, Clone)]
 pub struct ProjectConf {
     /// Set Project Name
     name: String,
@@ -73,125 +221,9 @@ pub struct ProjectConf {
 
 impl ProjectConf {
 
-    fn create_git(&self) -> Result<(), ()> {
-        if self.git {
-            let git_repo = Command::new("git")
-                .arg("init")
-                .arg(format!("{}/", self.name))
-                .output();
-            if git_repo.is_err() {
-                eprint(git_repo.unwrap_err().to_string());
-                return Err(());
-            }
-            // add build to gitignore
-            let git_ignore = fs::File::create(format!("{}/.gitignore", self.name));
-            if git_ignore.is_err() {
-                eprint(git_ignore.unwrap_err().to_string());
-                return Err(());
-            }
-            let mut git_ignore = git_ignore.unwrap();
-            match git_ignore.write_all(b"/build\n") {
-                Ok(_) => Ok(()),
-                Err(e) => {
-                    eprint(e.to_string());
-                    git_ignore.flush().unwrap();
-                    return Err(());
-                }
-            }
-        } else {
-            Ok(())
-        }
-        
-    }
-    
-    fn create_boilerplate_files(&self) -> Result<(), ()> {
-        let proj_dest = format!("{}/src", self.name);
-        let main_file = fs::File::create(format!("{}/main.py", proj_dest));
-        if main_file.is_err() {
-            eprint(main_file.unwrap_err().to_string());
-            return Err(());
-        }
-        // write started source
-        let mut main_file = main_file.unwrap();
-        match main_file.write_all(STARTER_SOURCE_PY.as_bytes()) {
-            Ok(_) => (),
-            Err(e) => {
-                eprint(e.to_string());
-                // close
-                main_file.flush().unwrap();
-                return Err(());
-            }
-        }
-        // close files
-        main_file.flush().unwrap();
-        Ok(())
-    }
-
-    fn save_config(&self) -> Result<(), ()> {
-        let mut conf = Config::new(
-            Project::new(
-                self.name.clone(),
-                self.version.clone(),
-                self.description.clone(),
-                "./src/main.py".to_string()
-            ),
-            HashMap::new(),
-            HashMap::new(),
-        );
-        conf.scripts.insert("upgrade-pip".to_string(), "python -m pip install --upgrade pip".to_string());
-
-        match conf.write_to_file(format!("{}/project.toml", self.name).as_str()){
-            Ok(_) => Ok(()),
-            Err(e) => {
-                eprint(e.to_string());
-                return Err(());
-            }
-        }
-    }
-
-    pub fn create_project(&self) {
-        let start = Instant::now();
-        let proj_dest = format!("{}/src", self.name);
-        if project_exists(&self.name) {
-            eprint(format!("Project With Name '{}' Already Exists", self.name));
-            return;
-        }
-        let dir_create = fs::create_dir_all(&proj_dest);
-        if dir_create.is_err() {
-            eprint(dir_create.unwrap_err().to_string());
-            return;
-        } 
-        
-        // create main.py file
-        if self.create_boilerplate_files().is_err() {
-            return;
-        }
-
-        // setup git
-        if self.create_git().is_err() {
-            return;
-        }
-
-        // venv
-        if !self.no_venv {
-            if setup_venv(format!("{}/venv", self.name)).is_err() {
-                eprint("Failed to setup venv".to_owned());
-                return;
-            }
-        } else {
-            wprint("Virtual environment is disabled, some commands might not work".to_string());
-        }
-
-        // save
-        if self.save_config().is_err() {
-           return;
-        }
-
-        let elapsed = start.elapsed();
-        iprint(format!("{} in {}s", "Completed".green(), elapsed.as_secs()));
-        println!("\nTo get started:");
-        println!("  cd {}", self.name.blue());
-        println!("  {} start\n", "ppm".red());
+    pub fn create_project(&self, is_init: bool) {
+        let proj_creator = ProjectCreator::new(self.clone(), is_init);
+        proj_creator.create_project();
     }
 
 }

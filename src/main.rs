@@ -24,7 +24,8 @@ fn main() {
     let cli = Cli::parse();
 
     match &cli.command {
-        Action::New(project) => project.create_project(),
+        Action::New(project) => project.create_project(false),
+        Action::Init(project) => project.create_project(true),
         Action::Add(add_proj) => add_proj.add_package(),
         Action::Rm(rp) => rp.remove_package(),
         Action::Run(run) => run.run_script(),
