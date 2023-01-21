@@ -7,3 +7,5 @@ fn main() {
     res.set_icon("ppm-icon.ico");
     res.compile().unwrap();
 }
+
+fn main() {}
